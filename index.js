@@ -201,6 +201,56 @@ app.post('/comments', verifyToken, requireRole('user'), async (req, res) => {
   res.status(201).json({ insertedId: result.insertedId });
 });
 
+app.get('/comments/me', verifyToken, requireRole('user'), async (req, res) => {
+  res.json(await comments.find({ userEmail: req.user.email }).sort({ createdAt: -1 }).toArray());
+});
+
+app.put('/comments/:id', verifyToken, requireRole('user'), async (req, res) => {
+  if (!validId(req.params.id, res)) return;
+  const comment = await comments.findOne({ _id: new ObjectId(req.params.id) });
+  if (!comment) return res.status(404).json({ message: 'Comment not found.' });
+  if (comment.userEmail !== req.user.email) return res.status(403).json({ message: 'You can only edit your own comments.' });
+  await comments.updateOne({ _id: comment._id }, { $set: { text: req.body.text?.trim(), rating: Number(req.body.rating || comment.rating), updatedAt: new Date() } });
+  res.json({ message: 'Comment updated.' });
+});
+
+app.delete('/comments/:id', verifyToken, requireRole('user'), async (req, res) => {
+  if (!validId(req.params.id, res)) return;
+  const comment = await comments.findOne({ _id: new ObjectId(req.params.id) });
+  if (!comment) return res.status(404).json({ message: 'Comment not found.' });
+  if (comment.userEmail !== req.user.email) return res.status(403).json({ message: 'You can only delete your own comments.' });
+  await comments.deleteOne({ _id: comment._id });
+  res.json({ message: 'Comment deleted.' });
+});
+
+app.patch('/profile', verifyToken, async (req, res) => {
+  const { name, image } = req.body;
+  await users.updateOne({ email: req.user.email }, { $set: { ...(name ? { name } : {}), ...(image ? { image } : {}), updatedAt: new Date() } });
+  res.json({ message: 'Profile updated.' });
+});
+
+app.get('/admin/users', verifyToken, requireRole('admin'), async (req, res) => {
+  res.json(await users.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray());
+});
+
+app.patch('/admin/users/:id/role', verifyToken, requireRole('admin'), async (req, res) => {
+  if (!validId(req.params.id, res)) return;
+  if (!['user', 'lawyer', 'admin'].includes(req.body.role)) return res.status(400).json({ message: 'Invalid role.' });
+  await users.updateOne({ _id: new ObjectId(req.params.id) }, { $set: { role: req.body.role, updatedAt: new Date() } });
+  res.json({ message: 'User role updated.' });
+});
+
+app.delete('/admin/users/:id', verifyToken, requireRole('admin'), async (req, res) => {
+  if (!validId(req.params.id, res)) return;
+  if (req.user.sub === req.params.id) return res.status(400).json({ message: 'You cannot delete your own admin account.' });
+  await users.deleteOne({ _id: new ObjectId(req.params.id) });
+  res.json({ message: 'User deleted.' });
+});
+
+app.get('/admin/transactions', verifyToken, requireRole('admin'), async (req, res) => {
+  res.json(await transactions.find({}).sort({ createdAt: -1 }).toArray());
+});
+
 app.get('/admin/analytics', verifyToken, requireRole('admin'), async (req, res) => {
   const [totalUsers, totalLawyers, totalHires, revenue] = await Promise.all([
     users.countDocuments(), lawyers.countDocuments(), hires.countDocuments(), transactions.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]).toArray(),
