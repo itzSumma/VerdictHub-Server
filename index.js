@@ -6,16 +6,19 @@ const cors = require('cors');
 const dotenv = require('dotenv');
 const { MongoClient, ObjectId, ServerApiVersion } = require('mongodb');
 const { createRemoteJWKSet, jwtVerify } = require('jose-cjs');
+const Stripe = require('stripe');
 
 dotenv.config();
 
 const app = express();
 const port = process.env.PORT || 5000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
+const dbName = process.env.DB_NAME || 'verdictHub';
 const client = new MongoClient(process.env.MONGODB_URI, {
   serverApi: { version: ServerApiVersion.v1, strict: true, deprecationErrors: true },
 });
-const db = client.db('verdict-hub');
+const db = client.db(dbName);
 const lawyers = db.collection('lawyers');
 const hires = db.collection('hires');
 const comments = db.collection('comments');
@@ -24,6 +27,7 @@ const transactions = db.collection('transactions');
 const jwks = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
 
 app.use(cors({ origin: clientUrl, credentials: true }));
+app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
 let connected = false;
@@ -69,7 +73,52 @@ const validId = (id, res) => {
   return false;
 };
 
+const saveSucceededPayment = async (intent, clientEmail) => {
+  const hireId = intent.metadata?.hireId;
+  if (!ObjectId.isValid(hireId)) {
+    throw new Error('Invalid payment metadata.');
+  }
+  if (clientEmail && intent.metadata?.clientEmail !== clientEmail) {
+    throw new Error('This payment does not belong to you.');
+  }
+  if (intent.status !== 'succeeded') {
+    throw new Error('Payment is not complete yet.');
+  }
+
+  const paidAt = new Date();
+  await hires.updateOne(
+    { _id: new ObjectId(hireId), ...(clientEmail ? { clientEmail } : {}) },
+    { $set: { paid: true, paidAt, paymentIntentId: intent.id, updatedAt: paidAt } }
+  );
+
+  await transactions.updateOne(
+    { paymentIntentId: intent.id },
+    {
+      $set: {
+        paymentIntentId: intent.id,
+        hireId,
+        clientEmail: intent.metadata?.clientEmail,
+        lawyerEmail: intent.metadata?.lawyerEmail,
+        lawyerName: intent.metadata?.lawyerName,
+        amount: intent.amount_received / 100,
+        currency: intent.currency,
+        status: 'succeeded',
+        paidAt,
+        updatedAt: paidAt,
+      },
+      $setOnInsert: { createdAt: paidAt },
+    },
+    { upsert: true }
+  );
+
+  return hireId;
+};
+
 app.get('/', (req, res) => res.send('VerdictHub API is running.'));
+
+app.get('/health', (req, res) => {
+  res.json({ status: 'ok', database: dbName, timestamp: new Date().toISOString() });
+});
 
 app.get('/lawyers', async (req, res) => {
   const { search = '', specialization, availability, minFee, maxFee, page = 1, limit = 8, sort = 'newest' } = req.query;
@@ -187,6 +236,112 @@ app.patch('/hires/:id/status', verifyToken, requireRole('lawyer'), async (req, r
   res.json({ message: 'Hiring request updated.' });
 });
 
+app.post('/payments/create-intent', verifyToken, requireRole('user'), async (req, res) => {
+  if (!process.env.STRIPE_SECRET_KEY) {
+    return res.status(500).json({ message: 'Stripe secret key is not configured.' });
+  }
+
+  const { hireId } = req.body;
+  if (!validId(hireId, res)) return;
+
+  const hire = await hires.findOne({ _id: new ObjectId(hireId), clientEmail: req.user.email });
+  if (!hire) return res.status(404).json({ message: 'Hiring request not found.' });
+  if (hire.status !== 'accepted') return res.status(400).json({ message: 'Lawyer must accept the request before payment.' });
+  if (hire.paid) return res.status(400).json({ message: 'This hiring request is already paid.' });
+
+  const amount = Math.round(Number(hire.fee || 0) * 100);
+  if (!amount || amount < 50) return res.status(400).json({ message: 'Invalid payment amount.' });
+
+  const paymentIntent = await stripe.paymentIntents.create({
+    amount,
+    currency: 'usd',
+    payment_method_types: ['card'],
+    metadata: {
+      hireId: hire._id.toString(),
+      clientEmail: hire.clientEmail,
+      lawyerEmail: hire.lawyerEmail,
+      lawyerName: hire.lawyerName,
+    },
+  });
+
+  await transactions.updateOne(
+    { paymentIntentId: paymentIntent.id },
+    {
+      $set: {
+        paymentIntentId: paymentIntent.id,
+        hireId: hire._id.toString(),
+        clientEmail: hire.clientEmail,
+        lawyerEmail: hire.lawyerEmail,
+        lawyerName: hire.lawyerName,
+        amount: amount / 100,
+        currency: 'usd',
+        status: paymentIntent.status,
+        updatedAt: new Date(),
+      },
+      $setOnInsert: { createdAt: new Date() },
+    },
+    { upsert: true }
+  );
+
+  res.json({ clientSecret: paymentIntent.client_secret, amount: amount / 100 });
+});
+
+app.post('/payments/confirm', verifyToken, requireRole('user'), async (req, res) => {
+  const { paymentIntentId } = req.body;
+  if (!paymentIntentId) return res.status(400).json({ message: 'Payment intent ID is required.' });
+
+  const intent = await stripe.paymentIntents.retrieve(paymentIntentId);
+  try {
+    const hireId = await saveSucceededPayment(intent, req.user.email);
+    res.json({ message: 'Payment confirmed.', hireId });
+  } catch (error) {
+    const status = error.message.includes('belong') ? 403 : 400;
+    res.status(status).json({ message: error.message });
+  }
+});
+
+app.get('/transactions/me', verifyToken, async (req, res) => {
+  res.json(await transactions.find({
+    $or: [{ clientEmail: req.user.email }, { lawyerEmail: req.user.email }],
+  }).sort({ createdAt: -1 }).toArray());
+});
+
+app.post('/webhooks/stripe', async (req, res) => {
+  if (!process.env.STRIPE_WEBHOOK_SECRET) {
+    return res.status(500).send('Stripe webhook secret is not configured.');
+  }
+
+  let event;
+  try {
+    event = stripe.webhooks.constructEvent(
+      req.body,
+      req.headers['stripe-signature'],
+      process.env.STRIPE_WEBHOOK_SECRET
+    );
+  } catch (error) {
+    return res.status(400).send(`Webhook Error: ${error.message}`);
+  }
+
+  if (event.type === 'payment_intent.succeeded') {
+    const intent = event.data.object;
+    try {
+      await saveSucceededPayment(intent);
+    } catch (error) {
+      console.error('Stripe payment sync failed:', error.message);
+    }
+  }
+
+  if (event.type === 'payment_intent.payment_failed') {
+    const intent = event.data.object;
+    await transactions.updateOne(
+      { paymentIntentId: intent.id },
+      { $set: { status: 'failed', failureMessage: intent.last_payment_error?.message, updatedAt: new Date() } }
+    );
+  }
+
+  res.json({ received: true });
+});
+
 app.get('/comments/:lawyerId', async (req, res) => {
   if (!validId(req.params.lawyerId, res)) return;
   res.json(await comments.find({ lawyerId: req.params.lawyerId }).sort({ createdAt: -1 }).toArray());
@@ -229,6 +384,12 @@ app.patch('/profile', verifyToken, async (req, res) => {
   res.json({ message: 'Profile updated.' });
 });
 
+app.get('/profile/me', verifyToken, async (req, res) => {
+  const profile = await users.findOne({ email: req.user.email }, { projection: { password: 0 } });
+  if (!profile) return res.status(404).json({ message: 'Profile not found.' });
+  res.json(profile);
+});
+
 app.get('/admin/users', verifyToken, requireRole('admin'), async (req, res) => {
   res.json(await users.find({}, { projection: { password: 0 } }).sort({ createdAt: -1 }).toArray());
 });
@@ -251,11 +412,24 @@ app.get('/admin/transactions', verifyToken, requireRole('admin'), async (req, re
   res.json(await transactions.find({}).sort({ createdAt: -1 }).toArray());
 });
 
+app.get('/admin/lawyers', verifyToken, requireRole('admin'), async (req, res) => {
+  res.json(await lawyers.find({}).sort({ createdAt: -1 }).toArray());
+});
+
 app.get('/admin/analytics', verifyToken, requireRole('admin'), async (req, res) => {
   const [totalUsers, totalLawyers, totalHires, revenue] = await Promise.all([
     users.countDocuments(), lawyers.countDocuments(), hires.countDocuments(), transactions.aggregate([{ $group: { _id: null, total: { $sum: '$amount' } } }]).toArray(),
   ]);
   res.json({ totalUsers, totalLawyers, totalHires, totalRevenue: revenue[0]?.total || 0 });
+});
+
+app.use((req, res) => {
+  res.status(404).json({ message: 'API route not found.' });
+});
+
+app.use((error, req, res, next) => {
+  console.error(error);
+  res.status(500).json({ message: 'Internal server error.' });
 });
 
 if (process.env.NODE_ENV !== 'production') app.listen(port, () => console.log(`VerdictHub API listening on ${port}`));
