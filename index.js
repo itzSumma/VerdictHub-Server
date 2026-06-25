@@ -13,7 +13,13 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
-const allowedOrigins = (process.env.CLIENT_URLS || clientUrl).split(',').map((origin) => origin.trim()).filter(Boolean);
+const normalizeOrigin = (origin) => origin?.trim().replace(/\/$/, '');
+const allowedOrigins = [
+  clientUrl,
+  'http://localhost:3000',
+  'https://verdict-hub-client.vercel.app',
+  ...(process.env.CLIENT_URLS || '').split(','),
+].map(normalizeOrigin).filter(Boolean);
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const dbName = process.env.DB_NAME || 'verdictHub';
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -29,7 +35,7 @@ const jwks = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
 
 app.use(cors({
   origin(origin, callback) {
-    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    if (!origin || allowedOrigins.includes(normalizeOrigin(origin))) return callback(null, true);
     return callback(new Error('Not allowed by CORS.'));
   },
   credentials: true,
