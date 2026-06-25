@@ -13,6 +13,7 @@ dotenv.config();
 const app = express();
 const port = process.env.PORT || 5000;
 const clientUrl = process.env.CLIENT_URL || 'http://localhost:3000';
+const allowedOrigins = (process.env.CLIENT_URLS || clientUrl).split(',').map((origin) => origin.trim()).filter(Boolean);
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY);
 const dbName = process.env.DB_NAME || 'verdictHub';
 const client = new MongoClient(process.env.MONGODB_URI, {
@@ -26,7 +27,13 @@ const users = db.collection('user');
 const transactions = db.collection('transactions');
 const jwks = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
 
-app.use(cors({ origin: clientUrl, credentials: true }));
+app.use(cors({
+  origin(origin, callback) {
+    if (!origin || allowedOrigins.includes(origin)) return callback(null, true);
+    return callback(new Error('Not allowed by CORS.'));
+  },
+  credentials: true,
+}));
 app.use('/webhooks/stripe', express.raw({ type: 'application/json' }));
 app.use(express.json());
 
