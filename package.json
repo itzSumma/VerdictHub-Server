@@ -9,6 +9,7 @@
     "prepare-db": "node scripts/prepare-db.js",
     "seed": "node scripts/seed-demo-data.js",
     "fill-showcase": "node scripts/fill-showcase-data.js",
+    "seed-lawyer-dashboard": "node scripts/seed-lawyer-dashboard.js",
     "start": "node index.js",
     "dev": "nodemon index.js"
   },
