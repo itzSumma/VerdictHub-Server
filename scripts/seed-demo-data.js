@@ -2,14 +2,16 @@ const dns = require('node:dns');
 dns.setServers(['1.1.1.1', '1.0.0.1']);
 
 require('dotenv').config();
+const crypto = require('node:crypto');
 const { MongoClient, ObjectId } = require('mongodb');
 
 const now = new Date();
+const demoPassword = 'VerdictHub@123';
 
 const demoUsers = [
-  { name: 'Admin User', email: 'admin@verdicthub.com', role: 'admin', image: 'https://i.ibb.co.com/CKDPRGm/lawyer-1.jpg', createdAt: now },
-  { name: 'Client User', email: 'client@verdicthub.com', role: 'user', image: 'https://i.ibb.co.com/wJdK7JH/lawyer-2.jpg', createdAt: now },
-  { name: 'Lawyer User', email: 'lawyer@verdicthub.com', role: 'lawyer', image: 'https://i.ibb.co.com/PzN3nLp/lawyer-3.jpg', createdAt: now },
+  { name: 'Demo Admin', email: 'demo.admin@verdicthub.com', role: 'admin', image: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=400&q=80', createdAt: now },
+  { name: 'Demo Client', email: 'demo.client@verdicthub.com', role: 'user', image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=400&q=80', createdAt: now },
+  { name: 'Demo Lawyer', email: 'demo.lawyer@verdicthub.com', role: 'lawyer', image: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=400&q=80', createdAt: now },
 ];
 
 const demoLawyers = [
@@ -103,26 +105,54 @@ const demoLawyers = [
   },
 ];
 
+const hashPassword = (password) => new Promise((resolve, reject) => {
+  const salt = crypto.randomBytes(16).toString('hex');
+  crypto.scrypt(password.normalize('NFKC'), salt, 64, {
+    N: 16384, r: 16, p: 1, maxmem: 128 * 16384 * 16 * 2,
+  }, (error, key) => {
+    if (error) reject(error);
+    else resolve(`${salt}:${key.toString('hex')}`);
+  });
+});
+
 async function seedDemoData() {
   const client = new MongoClient(process.env.MONGODB_URI);
   await client.connect();
 
   const db = client.db(process.env.DB_NAME || 'verdictHub');
   const users = db.collection('user');
+  const accounts = db.collection('account');
   const lawyers = db.collection('lawyers');
   const hires = db.collection('hires');
   const comments = db.collection('comments');
   const transactions = db.collection('transactions');
 
+  const demoEmails = demoUsers.map((user) => user.email);
+  const legacyDemoEmails = ['admin@verdicthub.com', 'client@verdicthub.com', 'lawyer@verdicthub.com'];
+
   await Promise.all([
-    users.deleteMany({ email: { $in: demoUsers.map((user) => user.email) } }),
+    users.deleteMany({ email: { $in: [...demoEmails, ...legacyDemoEmails] } }),
     lawyers.deleteMany({ email: { $in: demoLawyers.map((lawyer) => lawyer.email) } }),
     hires.deleteMany({ demo: true }),
     comments.deleteMany({ demo: true }),
     transactions.deleteMany({ demo: true }),
   ]);
 
-  await users.insertMany(demoUsers.map((user) => ({ ...user, updatedAt: now })));
+  const passwordHash = await hashPassword(demoPassword);
+  for (const user of demoUsers) {
+    const userId = new ObjectId();
+    await users.insertOne({ _id: userId, ...user, email: user.email.toLowerCase(), emailVerified: true, updatedAt: now });
+    await accounts.insertOne({
+      _id: new ObjectId(),
+      accountId: userId.toHexString(),
+      providerId: 'credential',
+      userId,
+      password: passwordHash,
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
   const insertedLawyers = await lawyers.insertMany(demoLawyers.map((lawyer) => ({
     ...lawyer,
     ownerId: lawyer.email,
@@ -143,7 +173,7 @@ async function seedDemoData() {
       lawyerName: acceptedLawyer.name,
       lawyerSpecialization: acceptedLawyer.specialization,
       fee: acceptedLawyer.hourlyRate,
-      clientEmail: 'client@verdicthub.com',
+      clientEmail: 'demo.client@verdicthub.com',
       status: 'accepted',
       paid: true,
       paymentIntentId: 'pi_demo_verdict_paid',
@@ -158,7 +188,7 @@ async function seedDemoData() {
       lawyerName: pendingLawyer.name,
       lawyerSpecialization: pendingLawyer.specialization,
       fee: pendingLawyer.hourlyRate,
-      clientEmail: 'client@verdicthub.com',
+      clientEmail: 'demo.client@verdicthub.com',
       status: 'pending',
       paid: false,
       requestedAt: new Date(now.getTime() - 2 * 86400000),
@@ -171,7 +201,7 @@ async function seedDemoData() {
       lawyerName: rejectedLawyer.name,
       lawyerSpecialization: rejectedLawyer.specialization,
       fee: rejectedLawyer.hourlyRate,
-      clientEmail: 'client@verdicthub.com',
+      clientEmail: 'demo.client@verdicthub.com',
       status: 'rejected',
       paid: false,
       requestedAt: new Date(now.getTime() - 1 * 86400000),
@@ -185,7 +215,7 @@ async function seedDemoData() {
       lawyerId: acceptedLawyer._id.toString(),
       text: 'Very professional consultation. The advice was clear and practical.',
       rating: 5,
-      userEmail: 'client@verdicthub.com',
+      userEmail: 'demo.client@verdicthub.com',
       createdAt: new Date(now.getTime() - 2 * 86400000),
       demo: true,
     },
@@ -193,7 +223,7 @@ async function seedDemoData() {
       lawyerId: acceptedLawyer._id.toString(),
       text: 'Helped us understand the contract risks before signing.',
       rating: 4,
-      userEmail: 'client@verdicthub.com',
+      userEmail: 'demo.client@verdicthub.com',
       createdAt: new Date(now.getTime() - 86400000),
       demo: true,
     },
@@ -202,7 +232,7 @@ async function seedDemoData() {
   await transactions.insertOne({
     paymentIntentId: 'pi_demo_verdict_paid',
     hireId: hireDocs[0]._id.toString(),
-    clientEmail: 'client@verdicthub.com',
+    clientEmail: 'demo.client@verdicthub.com',
     lawyerEmail: acceptedLawyer.email,
     lawyerName: acceptedLawyer.name,
     amount: acceptedLawyer.hourlyRate,
@@ -220,6 +250,7 @@ async function seedDemoData() {
   console.log(`Hires: ${await hires.countDocuments()}`);
   console.log(`Comments: ${await comments.countDocuments()}`);
   console.log(`Transactions: ${await transactions.countDocuments()}`);
+  console.log(`Demo login password: ${demoPassword}`);
 
   await client.close();
 }

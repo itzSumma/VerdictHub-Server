@@ -6,6 +6,20 @@ Express/MongoDB API for VerdictHub, an online lawyer hiring platform. The server
 
 - Server: https://verdict-hub-server.vercel.app/
 
+## Demo Credentials
+
+Use the same password for all demo roles:
+
+```text
+Password: VerdictHub@123
+```
+
+| Role | Email |
+| --- | --- |
+| Admin | demo.admin@verdicthub.com |
+| Lawyer | demo.lawyer@verdicthub.com |
+| User / Client | demo.client@verdicthub.com |
+
 ## Key Features
 
 - MongoDB database configured with `DB_NAME=verdictHub`
