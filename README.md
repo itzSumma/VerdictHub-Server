@@ -4,7 +4,7 @@ Express/MongoDB API for VerdictHub, an online lawyer hiring platform. The server
 
 ## Live Link
 
-- Server: add deployed server URL
+- Server: https://verdict-hub-server.vercel.app/
 
 ## Key Features
 
