@@ -9,7 +9,7 @@ const lawyerEmail = 'demo.lawyer@verdicthub.com';
 
 const listings = [
   {
-    name: 'Demo Lawyer - Corporate Counsel',
+    name: 'Corporate Counsel Service',
     specialization: 'Corporate',
     hourlyRate: 125,
     availability: 'available',
@@ -19,7 +19,7 @@ const listings = [
     hireCount: 12,
   },
   {
-    name: 'Demo Lawyer - Property Advisor',
+    name: 'Property Advisory Service',
     specialization: 'Property',
     hourlyRate: 95,
     availability: 'available',
@@ -29,7 +29,7 @@ const listings = [
     hireCount: 8,
   },
   {
-    name: 'Demo Lawyer - Family Mediation',
+    name: 'Family Mediation Service',
     specialization: 'Family',
     hourlyRate: 80,
     availability: 'busy',
@@ -70,7 +70,7 @@ async function seedLawyerDashboard() {
     { email: lawyerEmail },
     {
       $set: {
-        name: 'Demo Lawyer',
+        name: 'Ariana Rahman',
         email: lawyerEmail,
         role: 'lawyer',
         image: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=400&q=80',
@@ -163,10 +163,10 @@ async function seedLawyerDashboard() {
   await comments.insertMany(commentDocs);
 
   console.log('Lawyer dashboard database updated.');
-  console.log(`Demo lawyer listings: ${await lawyers.countDocuments({ email: lawyerEmail })}`);
-  console.log(`Demo lawyer hires: ${await hires.countDocuments({ lawyerEmail })}`);
-  console.log(`Demo lawyer transactions: ${await transactions.countDocuments({ lawyerEmail })}`);
-  console.log(`Demo lawyer comments: ${await comments.countDocuments({ lawyerId: { $in: insertedListings.map((item) => item._id.toString()) } })}`);
+  console.log(`Lawyer listings: ${await lawyers.countDocuments({ email: lawyerEmail })}`);
+  console.log(`Lawyer hires: ${await hires.countDocuments({ lawyerEmail })}`);
+  console.log(`Lawyer transactions: ${await transactions.countDocuments({ lawyerEmail })}`);
+  console.log(`Lawyer comments: ${await comments.countDocuments({ lawyerId: { $in: insertedListings.map((item) => item._id.toString()) } })}`);
 
   await client.close();
 }

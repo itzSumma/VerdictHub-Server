@@ -9,9 +9,9 @@ const now = new Date();
 const demoPassword = 'VerdictHub@123';
 
 const demoUsers = [
-  { name: 'Demo Admin', email: 'demo.admin@verdicthub.com', role: 'admin', image: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=400&q=80', createdAt: now },
-  { name: 'Demo Client', email: 'demo.client@verdicthub.com', role: 'user', image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=400&q=80', createdAt: now },
-  { name: 'Demo Lawyer', email: 'demo.lawyer@verdicthub.com', role: 'lawyer', image: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=400&q=80', createdAt: now },
+  { name: 'Platform Admin', email: 'demo.admin@verdicthub.com', role: 'admin', image: 'https://images.unsplash.com/photo-1560250097-0b93528c311a?auto=format&fit=crop&w=400&q=80', createdAt: now },
+  { name: 'Sharmin Akter', email: 'demo.client@verdicthub.com', role: 'user', image: 'https://images.unsplash.com/photo-1573496359142-b8d87734a5a2?auto=format&fit=crop&w=400&q=80', createdAt: now },
+  { name: 'Ariana Rahman', email: 'demo.lawyer@verdicthub.com', role: 'lawyer', image: 'https://images.unsplash.com/photo-1551836022-d5d88e9218df?auto=format&fit=crop&w=400&q=80', createdAt: now },
 ];
 
 const demoLawyers = [
