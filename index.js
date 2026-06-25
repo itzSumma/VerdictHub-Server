@@ -219,6 +219,13 @@ app.post('/hires', verifyToken, requireRole('user'), async (req, res) => {
   if (!validId(lawyerId, res)) return;
   const lawyer = await lawyers.findOne({ _id: new ObjectId(lawyerId), published: true });
   if (!lawyer) return res.status(404).json({ message: 'Lawyer not found.' });
+  const existingHire = await hires.findOne({
+    lawyerId,
+    clientEmail: req.user.email,
+    status: { $in: ['pending', 'accepted'] },
+    paid: { $ne: true },
+  });
+  if (existingHire) return res.status(409).json({ message: 'You already have an active request for this lawyer.' });
   const hire = { lawyerId, lawyerEmail: lawyer.email, lawyerName: lawyer.name, lawyerSpecialization: lawyer.specialization, fee: lawyer.hourlyRate, clientEmail: req.user.email, status: 'pending', paid: false, requestedAt: new Date() };
   const result = await hires.insertOne(hire);
   await lawyers.updateOne({ _id: lawyer._id }, { $inc: { hireCount: 1 } });
