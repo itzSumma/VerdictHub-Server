@@ -31,7 +31,13 @@ const hires = db.collection('hires');
 const comments = db.collection('comments');
 const users = db.collection('user');
 const transactions = db.collection('transactions');
-const jwks = createRemoteJWKSet(new URL(`${clientUrl}/api/auth/jwks`));
+const authOrigins = [...new Set([
+  clientUrl,
+  'https://verdict-hub-client.vercel.app',
+  'http://localhost:3000',
+  ...(process.env.CLIENT_URLS || '').split(','),
+].map(normalizeOrigin).filter(Boolean))];
+const jwksList = authOrigins.map((origin) => createRemoteJWKSet(new URL(`${origin}/api/auth/jwks`)));
 
 app.use(cors({
   origin(origin, callback) {
@@ -61,14 +67,17 @@ const verifyToken = async (req, res, next) => {
     ? req.headers.authorization.slice(7)
     : null;
   if (!token) return res.status(401).json({ message: 'Authentication is required.' });
-  try {
-    const { payload } = await jwtVerify(token, jwks);
-    if (!payload.email) return res.status(403).json({ message: 'Invalid user token.' });
-    req.user = payload;
-    next();
-  } catch {
-    res.status(403).json({ message: 'Invalid or expired token.' });
+  for (const jwks of jwksList) {
+    try {
+      const { payload } = await jwtVerify(token, jwks);
+      if (!payload.email) return res.status(403).json({ message: 'Invalid user token.' });
+      req.user = payload;
+      return next();
+    } catch {
+      // Try the next trusted auth origin.
+    }
   }
+  res.status(403).json({ message: 'Invalid or expired token.' });
 };
 
 const requireRole = (...roles) => async (req, res, next) => {
